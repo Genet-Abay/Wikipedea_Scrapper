@@ -3,6 +3,7 @@ from bs4 import BeautifulSoup as bs
 import re
 from functools import lru_cache
 import json
+from concurrent.futures import ThreadPoolExecutor
 
 cache = {}
 def hashable_cache(f):
@@ -25,14 +26,17 @@ def get_first_paragraph(wikipedia_url, session_param):
         a.extract()
         
     paragraphs = soup.find_all('p')
+
+    #looking for first paragraph
     first_paragraph_index = 0
-    i = 0
+    i = 0   
     for paragraph in soup.find_all("p"):   
         if paragraph.find('b') != None:
             first_paragraph_index = i            
             break
         i+=1
     
+    #use first_paragraph_index to access the first paragraph
     first_paragraph = paragraphs[first_paragraph_index].text
     
     if wikipedia_url.startswith('https://en.'): #to reduce conflict with other language characters
@@ -72,6 +76,7 @@ def get_leaders():
         
         req_leaders = requests.get(leaders_url, cookies =cookies, params = param)
         
+        #check if cookies expired, if so creat it again
         if req_leaders.status_code == 403:
             cookies=req_cookies.cookies
             req_leaders = requests.get(leaders_url, cookies =cookies, params = param)
@@ -79,7 +84,18 @@ def get_leaders():
         content = req_leaders.text    
         content = content.strip('[, ]')
         list_leaders_currentcountry = content.split('}')
-#         print(".......... \nleaders info started here \n")
+
+        with ThreadPoolExecutor() as pool:
+            clean_leader_info_percountry = list(pool.map(get_simplified_info, list_leaders_currentcountry, session))
+
+        leaders_per_country[country] = clean_leader_info_percountry
+    return leaders_per_country     
+
+
+
+
+def get_simplified_info(list_leaders_currentcountry, session):
+    #         print(".......... \nleaders info started here \n")
         clean_leader_info_percountry = []
         for leader_info in list_leaders_currentcountry:
             leader_info_clean = leader_info.strip('{, }')
@@ -120,15 +136,18 @@ def get_leaders():
             leader_info_dict['first_paragraph'] = first_paragraph
             
             clean_leader_info_percountry.append(leader_info_dict) #list of leaders info for current country under the loop
-        leaders_per_country[country] = clean_leader_info_percountry
-    return leaders_per_country     
+
+        return clean_leader_info_percountry
 
 
-def save():
+
+
+#save generated dictionary of files into the given directory
+def save(dir = "C:/BeCode/LocalRepos/output_all_country/"):
     for country in countries:
         try:
             country = country.replace('\"', "")
-            file_name = "C:/BeCode/LocalRepos/Wikipedea_Scrapper/output/" + country + "_leaders.json"
+            file_name = dir + country + "_leaders.json"
             json_file = open(file_name, 'w')
             json_file.write(json.dumps(leaders_per_country.get(country)))
             json_file.close()
@@ -151,10 +170,13 @@ def read_leaders_info(country='us'):
 
 
 
-def main():
-    get_leaders()
-    save()
+# def main():
+#     get_leaders()
+#     save()
 
 
-if __name__ == "__main__":
-    main()
+# if __name__ == "__main__":
+#     main()
+
+get_leaders()
+save()
