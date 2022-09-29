@@ -10,4 +10,4 @@ Input: API to read country leaders and informationns
 json file containing simplified leaders information per country
 
 ## Rnunning the project
-to be defined
+call function get_leaders()
