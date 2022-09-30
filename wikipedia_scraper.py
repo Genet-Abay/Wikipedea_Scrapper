@@ -1,9 +1,11 @@
+import itertools
 import requests
 from bs4 import BeautifulSoup as bs
 import re
 from functools import lru_cache
 import json
 from concurrent.futures import ThreadPoolExecutor
+import os
 
 cache = {}
 def hashable_cache(f):
@@ -13,10 +15,15 @@ def hashable_cache(f):
         return cache[url]
     return inner
 
+##############################################
 #@hashable_cache
 @lru_cache(maxsize = None)
 def get_first_paragraph(wikipedia_url, session_param):
-#     print(wikipedia_url)
+    '''
+    Returns the first paragraph from the given wikipedia url.
+    session_param: object to reques wikipage
+    '''
+
     req= session_param.get(wikipedia_url) # requests changed by session_param
     content = req.text
     soup = bs(content, 'html')
@@ -27,16 +34,15 @@ def get_first_paragraph(wikipedia_url, session_param):
         
     paragraphs = soup.find_all('p')
 
-    #looking for first paragraph
+    #looking for index to read first paragraph based on bold text
     first_paragraph_index = 0
     i = 0   
-    for paragraph in soup.find_all("p"):   
+    for paragraph in paragraphs:   
         if paragraph.find('b') != None:
             first_paragraph_index = i            
             break
-        i+=1
-    
-    #use first_paragraph_index to access the first paragraph
+        i+=1    
+   
     first_paragraph = paragraphs[first_paragraph_index].text
     
     if wikipedia_url.startswith('https://en.'): #to reduce conflict with other language characters
@@ -47,11 +53,58 @@ def get_first_paragraph(wikipedia_url, session_param):
    
     return sanitized_paragraph
 
-
-def get_leaders():
-    global countries
+#######################################################
+def get_simplified_info(leader_info, session):
+    '''
+    Returns simplified info and first paragraph of given leader's discription.
+    session: object to request wikipedia of the leader
+    '''
+    leader_info_clean = leader_info.strip('{, }')
+    list_leader_info = leader_info_clean.split(',')
+    leader_fname = ""
+    leader_lname = ""
+    wiki_url = ""
     
-    root_url = "https://country-leaders.herokuapp.com"
+    simple_leader_info_dict={}            
+    for info in list_leader_info:                
+        if 'wikipedia' in info:
+            wiki_split = info.split(':')
+            wiki_url = (wiki_split[1] + ":" + wiki_split[2]).replace("\"", "")
+        elif "first_name" in info:
+            leader_fname = info.split(':')[1].replace("\"", "")
+            
+        elif "last_name" in info:
+            leader_lname = info.split(':')[1].replace("\"", "")
+            
+        
+        if leader_fname == "" or leader_lname == "" or wiki_url == "":
+            continue
+        else:
+            break #has to break out from this loop because no neet to travel to all information
+    
+    
+    try: 
+        first_paragraph = get_first_paragraph(wiki_url, session)  
+    except:
+        first_paragraph = "first paragraph could not be extracted. Either link not found or link has error"
+            
+    print(leader_fname + " " + leader_lname + ",  " + wiki_url )
+    print(first_paragraph)
+    simple_leader_info_dict['first_name'] = leader_fname
+    simple_leader_info_dict['last_name'] = leader_lname
+    simple_leader_info_dict['wikipedia_url'] = wiki_url
+    simple_leader_info_dict['first_paragraph'] = first_paragraph
+
+    return simple_leader_info_dict
+
+##################################################
+def get_leaders(root_url = "https://country-leaders.herokuapp.com"):
+    '''
+    Returns a simplified leaders information, together with first paragraph
+    scratched from their wikipedia page, as a dictionary
+    '''
+    global countries   
+    
     cookie_url = root_url + "/cookie"
     country_url = root_url + "/countries"
     leaders_url = root_url + "/leaders"
@@ -67,8 +120,7 @@ def get_leaders():
     countries = countries.split(",")    
     
     session = requests.Session()
-
-    global leaders_per_country
+    
     leaders_per_country = {}
     for country in countries:
         country = country.replace('\"', "")
@@ -84,82 +136,41 @@ def get_leaders():
         content = req_leaders.text    
         content = content.strip('[, ]')
         list_leaders_currentcountry = content.split('}')
+        clean_leaders_info_percountry = []
 
         with ThreadPoolExecutor() as pool:
-            clean_leader_info_percountry = list(pool.map(get_simplified_info, list_leaders_currentcountry, session))
+            clean_leaders_info_percountry = list(pool.map(get_simplified_info, list_leaders_currentcountry, itertools.repeat(session)))
 
-        leaders_per_country[country] = clean_leader_info_percountry
+        leaders_per_country[country] = clean_leaders_info_percountry
     return leaders_per_country     
 
 
-
-
-def get_simplified_info(list_leaders_currentcountry, session):
-    #         print(".......... \nleaders info started here \n")
-        clean_leader_info_percountry = []
-        for leader_info in list_leaders_currentcountry:
-            leader_info_clean = leader_info.strip('{, }')
-            list_leader_info = leader_info_clean.split(',')
-            leader_fname = ""
-            leader_lname = ""
-            wiki_url = ""
-            
-            leader_info_dict={}
-            
-            for info in list_leader_info:                
-                if 'wikipedia' in info:
-                    wiki_split = info.split(':')
-                    wiki_url = (wiki_split[1] + ":" + wiki_split[2]).replace("\"", "")
-                elif "first_name" in info:
-                    leader_fname = info.split(':')[1].replace("\"", "")
-                    
-                elif "last_name" in info:
-                    leader_lname = info.split(':')[1].replace("\"", "")
-                    
-                
-                if leader_fname == "" or leader_lname == "" or wiki_url == "":
-                    continue
-                else:
-                    break #has to break out from this loop because no neet to travel to all information
-            
-            #break
-            try: 
-                first_paragraph = get_first_paragraph(wiki_url, session)  
-            except:
-                first_paragraph = "first paragraph could not be extracted. Either link not found or link has error"
-                  
-            print(leader_fname + " " + leader_lname + ",  " + wiki_url )
-            print(first_paragraph)
-            leader_info_dict['first_name'] = leader_fname
-            leader_info_dict['last_name'] = leader_lname
-            leader_info_dict['wikipedia_url'] = wiki_url
-            leader_info_dict['first_paragraph'] = first_paragraph
-            
-            clean_leader_info_percountry.append(leader_info_dict) #list of leaders info for current country under the loop
-
-        return clean_leader_info_percountry
-
-
-
-
-#save generated dictionary of files into the given directory
-def save(dir = "C:/BeCode/LocalRepos/output_all_country/"):
+#######################################
+def save(leaders_per_country, dir):
+    '''
+    Takes leaders information of countries as a dictionary
+    and write then on respective file in the given directory(dir)
+    '''
     for country in countries:
         try:
             country = country.replace('\"', "")
-            file_name = dir + country + "_leaders.json"
+            file_name = dir + "/" + country + "_leaders.json"
             json_file = open(file_name, 'w')
             json_file.write(json.dumps(leaders_per_country.get(country)))
             json_file.close()
         except IOError:
-            print("cant write the file content in the country: " + country)
+            print("can't write the file content in the country: " + country)
         else:
             print("file successfully written")
             
     
+#######################################
 def read_leaders_info(country='us'):
+    '''
+    Retrieve simplified information of leaders for a give coutry
+    '''
     try:
-        file_name = "C:/BeCode/LocalRepos/Wikipedea_Scrapper/output/" + country + "_leaders.json"
+        file_name = "C:/BeCode/LocalRepos/output_all_country2/" + country + "_leaders.json"
         file_json = open(file_name, 'r')
         data = json.load(file_json)
         file_json.close()
@@ -170,13 +181,17 @@ def read_leaders_info(country='us'):
 
 
 
-# def main():
-#     get_leaders()
-#     save()
+def main(dir = "C:/"):
+    op_dir = os.path.join(dir+"wiki_scraper_output")
+    os.mkdir(op_dir)
 
 
-# if __name__ == "__main__":
-#     main()
+    leaders_per_country = get_leaders()
+    save(leaders_per_country, op_dir)
 
-get_leaders()
-save()
+
+if __name__ == "__main__":
+    main()
+
+# leaders_per_country = get_leaders()
+# save(leaders_per_country, "C:/BeCode/LocalRepos/output_all_country2/")
